@@ -45,7 +45,7 @@ class Graph_Summarizer:
         desc_parts = []
 
         for key, value in node.items():
-            # Attempt to parse JSON-like strings into lists
+            # Attempt to parse JSON-like strings into list
             if isinstance(value, str):
                 try:
                     parsed_value = json.loads(value)
