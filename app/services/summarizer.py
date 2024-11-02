@@ -1,16 +1,20 @@
 # Handles graph-related operations like processing nodes, edges, generating responses ...
 from collections import defaultdict
-from flask import current_app
 from app.services.annotation_service import query_knowledge_graph
 from app.services.llm_models import GeminiModel,OpenAIModel
 import re
 import traceback
 import json
+import tiktoken
+from flask import Flask
+
+app = Flask(__name__)
 
 class Graph_Summarizer:
     
     def __init__(self,llm) -> None:
         self.llm = llm
+        self.tokenizer = tiktoken.get_encoding("cl100k_base")
 
     def clean_and_format_response(self,desc):
         """Cleans the response from a model and formats it with multiple lines."""
@@ -58,8 +62,10 @@ class Graph_Summarizer:
             desc_parts.append(f"{key.capitalize()}: {value}")
         return " | ".join(desc_parts)
 
+
     def generate_grouped_descriptions(self,edges, nodes,batch_size=50):
         grouped_edges = self.group_edges_by_source(edges)
+        # print (grouped_edges)
         descriptions = []
 
         # Process each source node and its related target nodes
@@ -82,12 +88,9 @@ class Graph_Summarizer:
             source_and_targets = (f"Source Node ({source_node_id}): {source_desc}\n" +
                                 "\n".join(target_descriptions))
             descriptions.append(source_and_targets)
-
-            # If batch processing is required, we can break or yield after each batch
-            # if len(descriptions) >= batch_size:
-            #   break   Process the next batch in another iteration
-
         return descriptions
+    
+    
 
     def nodes_description(self,nodes):
         nodes_descriptions = []
@@ -98,19 +101,74 @@ class Graph_Summarizer:
             nodes_descriptions.append(source_desc)
         return nodes_descriptions
     
-    def graph_description(self,graph):
+    def num_tokens_from_string(self, encoding_name: str, max_tokens=2000):
+        """Calculates the number of tokens in each description and groups them under a token limit,
+        carrying over a summary of the previous batch to each new batch."""
+        encoding = tiktoken.get_encoding(encoding_name)
+        accumulated_tokens = 0
+        grouped_descriptions = []
+        current_batch = []
+        previous_summary = ""  
+
+        for i, desc in enumerate(self.description, start=1):
+            # Calculate tokens in the current description
+            desc_tokens = len(encoding.encode(desc))
+            print(f"\n--- Processing Description {i} ---")
+            print(f"Tokens in current description: {desc_tokens}")
+
+            # Check if adding this description would exceed max tokens
+            if accumulated_tokens + desc_tokens <= max_tokens:
+                current_batch.append(desc)
+                accumulated_tokens += desc_tokens
+                print(f"Current Batch (Tokens: {accumulated_tokens}): {current_batch}")
+            else:
+                # Summarize the current batch and append to grouped descriptions
+                batch_with_summary = previous_summary + "\n".join(current_batch)
+                grouped_descriptions.append(batch_with_summary)
+                print("\n** Batch Reached Max Token Limit **")
+                print("Adding current batch with previous summary to grouped descriptions:")
+                print(batch_with_summary)
+                print("-------------------------------------------------------------")
+
+                # Prepare the new batch, carrying over the summary(update the new summary)
+                previous_summary = "\n".join(current_batch) + "\n"  
+                current_batch = [desc]
+                accumulated_tokens = desc_tokens
+                print(f"\nStarting new batch with previous summary:\n{previous_summary}")
+                print(f"New Batch initialized with first description: {current_batch}")
+                print(f"Accumulated tokens reset to: {accumulated_tokens}")
+
+        # Add any remaining descriptions in current_batch to grouped descriptions
+        if current_batch:
+            final_batch_with_summary = previous_summary + "\n".join(current_batch)
+            grouped_descriptions.append(final_batch_with_summary)
+            print("\n** Final Batch with Summary **")
+            print("Adding final batch with previous summary to grouped descriptions:")
+            print(final_batch_with_summary)
+            print("-------------------------------------------------------------")
+
+        return grouped_descriptions
+
+    def graph_description(self, graph):
         nodes = {node['data']['id']: node['data'] for node in graph['nodes']}
-    
-        # Check if the 'edges' key exists in the graph
+        
         if len(graph['edges']) > 0:
             edges = [{'source_node': edge['data']['source_node'],
                     'target_node': edge['data']['target_node'],
                     'label': edge['data']['label']} for edge in graph['edges']]
             self.description = self.generate_grouped_descriptions(edges, nodes, batch_size=10)
+            print('self.description generated')
+            # for index, description in enumerate(self.description):
+            #     print(f"Index {index}:\n{description}\n{'-' * 40}")
+            
+            # Split descriptions by token limit
+            batched_descriptions = self.num_tokens_from_string("cl100k_base")  
+            return batched_descriptions
+        
         else:
             self.description = self.nodes_description(nodes)
-        
-        return self.description
+            # print("Node descriptions:", self.description)
+            return self.description
 
     def open_ai_summarizer(self,graph,user_query=None,query_json_format = None):
         try:
@@ -164,7 +222,7 @@ class Graph_Summarizer:
         explanation_prompt = self.construct_explanation_prompt(node_label, node_id, node_connections)
 
         response = self.llm.generate(explanation_prompt)
-        print(response)
+        # print(response)
         return response
 
     def create_request_payloads(self, node_relationships, node_label, node_id):
