@@ -45,7 +45,7 @@ class Graph_Summarizer:
         desc_parts = []
 
         for key, value in node.items():
-            # Attempt to parse JSON-like strings into list
+            # Attempt to parse JSON-like strings into lists
             if isinstance(value, str):
                 try:
                     parsed_value = json.loads(value)
@@ -102,52 +102,49 @@ class Graph_Summarizer:
         return nodes_descriptions
     
     def num_tokens_from_string(self, encoding_name: str, max_tokens=2000):
-        """Calculates the number of tokens in each description and groups them under a token limit,
-        carrying over a summary of the previous batch to each new batch."""
+        """Calculates the number of tokens in each description and groups them into batches under a token limit."""
         encoding = tiktoken.get_encoding(encoding_name)
         accumulated_tokens = 0
         grouped_descriptions = []
-        current_batch = []
-        previous_summary = ""  
+        self.current_batch = []  
 
+        # Loop through each description
         for i, desc in enumerate(self.description, start=1):
-            # Calculate tokens in the current description
+            # Calculate the number of tokens in the current description
             desc_tokens = len(encoding.encode(desc))
             print(f"\n--- Processing Description {i} ---")
             print(f"Tokens in current description: {desc_tokens}")
 
-            # Check if adding this description would exceed max tokens
+            # Check if adding this description would exceed the max token limit
             if accumulated_tokens + desc_tokens <= max_tokens:
-                current_batch.append(desc)
+                # If within limit, add description to the current batch
+                self.current_batch.append(desc)
                 accumulated_tokens += desc_tokens
-                print(f"Current Batch (Tokens: {accumulated_tokens}): {current_batch}")
+                print(f"Current Batch (Tokens: {accumulated_tokens}): {self.current_batch}")
             else:
-                # Summarize the current batch and append to grouped descriptions
-                batch_with_summary = previous_summary + "\n".join(current_batch)
-                grouped_descriptions.append(batch_with_summary)
+                # If limit is exceeded, save the current batch
+                grouped_descriptions.append(self.current_batch)
                 print("\n** Batch Reached Max Token Limit **")
-                print("Adding current batch with previous summary to grouped descriptions:")
-                print(batch_with_summary)
+                print("Adding current batch to grouped descriptions:")
+                print(self.current_batch)
                 print("-------------------------------------------------------------")
 
-                # Prepare the new batch, carrying over the summary(update the new summary)
-                previous_summary = "\n".join(current_batch) + "\n"  
-                current_batch = [desc]
-                accumulated_tokens = desc_tokens
-                print(f"\nStarting new batch with previous summary:\n{previous_summary}")
-                print(f"New Batch initialized with first description: {current_batch}")
+                # Start a new batch with the current description
+                self.current_batch = [desc]
+                accumulated_tokens = desc_tokens  # Reset accumulated tokens for the new batch
+                print(f"New Batch initialized with first description: {self.current_batch}")
                 print(f"Accumulated tokens reset to: {accumulated_tokens}")
 
-        # Add any remaining descriptions in current_batch to grouped descriptions
-        if current_batch:
-            final_batch_with_summary = previous_summary + "\n".join(current_batch)
-            grouped_descriptions.append(final_batch_with_summary)
-            print("\n** Final Batch with Summary **")
-            print("Adding final batch with previous summary to grouped descriptions:")
-            print(final_batch_with_summary)
+        # Add any remaining descriptions in the current batch
+        if self.current_batch:
+            grouped_descriptions.append(self.current_batch)
+            print("\n** Final Batch **")
+            print("Adding final batch to grouped descriptions:")
+            print(self.current_batch)
             print("-------------------------------------------------------------")
 
         return grouped_descriptions
+
 
     def graph_description(self, graph):
         nodes = {node['data']['id']: node['data'] for node in graph['nodes']}
@@ -162,7 +159,8 @@ class Graph_Summarizer:
             #     print(f"Index {index}:\n{description}\n{'-' * 40}")
             
             # Split descriptions by token limit
-            batched_descriptions = self.num_tokens_from_string("cl100k_base")  
+            batched_descriptions = self.num_tokens_from_string("cl100k_base")
+            # print('total batched descritions',batched_descriptions)
             return batched_descriptions
         
         else:
@@ -170,15 +168,15 @@ class Graph_Summarizer:
             # print("Node descriptions:", self.description)
             return self.description
 
-    def open_ai_summarizer(self,graph,user_query=None,query_json_format = None):
+    def open_ai_summarizer(self, graph,user_query=None,query_json_format = None):
         try:
             self.graph_description(graph)
-            
+            print('current batch in the summerizer', self.current_batch)
             if user_query and query_json_format:
                 prompt = (
                         f"You are an expert biology assistant on summarizing graph data.\n\n"
                         f"User Query: {user_query}\n\n"
-                        f"Given the following data visualization:\n{self.description}\n\n"
+                        f"Given the following data visualization:\n{self.current_batch }\n\n"
                         f"Your task is to analyze the graph and summarize the most important trends, patterns, and relationships.\n"
                         f"Instructions:\n"
                         f"- Begin by restating the user's query from {query_json_format} to show its relevance to the graph.\n"
@@ -191,7 +189,7 @@ class Graph_Summarizer:
             else:
                 prompt = (
                         f"You are an expert biology assistant on summarizing graph data.\n\n"
-                        f"Given the following graph data:\n{self.description}\n\n"
+                        f"Given the following graph data:\n{self.current_batch}\n\n"
                         f"Your task is to analyze and summarize the most important trends, patterns, and relationships.\n"
                         f"Instructions:\n"
                         f"- Identify key trends, relationships.\n"
