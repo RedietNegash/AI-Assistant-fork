@@ -45,46 +45,37 @@ class Graph_Summarizer:
         desc_parts = []
 
         for key, value in node.items():
-            # Attempt to parse JSON-like strings into lists
             if isinstance(value, str):
                 try:
                     parsed_value = json.loads(value)
                     if isinstance(parsed_value, list):
-                        # Limit to top 3 items
                         top_items = parsed_value[:3]
                         if top_items:
                             desc_parts.append(f"{key.capitalize()}: {', '.join(top_items)}")
-                        continue  # Move to the next attribute after processing
+                        continue 
                 except json.JSONDecodeError:
-                    pass  # If not a JSON string, treat it as a regular string
-
-            # For non-list attributes, simply add them to the description
+                    pass  
             desc_parts.append(f"{key.capitalize()}: {value}")
         return " | ".join(desc_parts)
 
 
     def generate_grouped_descriptions(self,edges, nodes,batch_size=50):
         grouped_edges = self.group_edges_by_source(edges)
-        # print (grouped_edges)
         descriptions = []
 
-        # Process each source node and its related target nodes
+    
         for source_node_id, related_edges in grouped_edges.items():
             source_node = nodes.get(source_node_id, {})
             source_desc = self.generate_node_description(source_node)
 
-            # Collect descriptions for all target nodes linked to this source node
+            
             target_descriptions = []
             for edge in related_edges:
                 target_node_id = edge["target_node"].split(' ')[-1]
                 target_node = nodes.get(target_node_id, {})
-                target_desc = self.generate_node_description(target_node)
-
-                # Add the relationship and target node description
+                target_desc = self.generate_node_description(target_node)  
                 label = edge["label"]
                 target_descriptions.append(f"{label} -> Target Node ({edge['target_node']}): {target_desc}")
-
-            # Combine the source node description with all target node descriptions
             source_and_targets = (f"Source Node ({source_node_id}): {source_desc}\n" +
                                 "\n".join(target_descriptions))
             descriptions.append(source_and_targets)
@@ -94,7 +85,6 @@ class Graph_Summarizer:
 
     def nodes_description(self,nodes):
         nodes_descriptions = []
-        # Process each source node and its related target nodes
         for source_node_id in nodes:
             source_node = nodes.get(source_node_id, {})
             source_desc = self.generate_node_description(source_node)
@@ -105,45 +95,34 @@ class Graph_Summarizer:
         """Calculates the number of tokens in each description and groups them into batches under a token limit."""
         encoding = tiktoken.get_encoding(encoding_name)
         accumulated_tokens = 0
-        grouped_descriptions = []
+        grouped_batched_descriptions = []
         self.current_batch = []  
 
-        # Loop through each description
-        for i, desc in enumerate(self.description, start=1):
-            # Calculate the number of tokens in the current description
+        for i, desc in enumerate(self.description):
+           
             desc_tokens = len(encoding.encode(desc))
-            print(f"\n--- Processing Description {i} ---")
             print(f"Tokens in current description: {desc_tokens}")
 
-            # Check if adding this description would exceed the max token limit
+           
             if accumulated_tokens + desc_tokens <= max_tokens:
-                # If within limit, add description to the current batch
                 self.current_batch.append(desc)
                 accumulated_tokens += desc_tokens
-                print(f"Current Batch (Tokens: {accumulated_tokens}): {self.current_batch}")
             else:
-                # If limit is exceeded, save the current batch
-                grouped_descriptions.append(self.current_batch)
+                grouped_batched_descriptions.append(self.current_batch)
                 print("\n** Batch Reached Max Token Limit **")
                 print("Adding current batch to grouped descriptions:")
-                print(self.current_batch)
-                print("-------------------------------------------------------------")
+          
 
-                # Start a new batch with the current description
                 self.current_batch = [desc]
-                accumulated_tokens = desc_tokens  # Reset accumulated tokens for the new batch
-                print(f"New Batch initialized with first description: {self.current_batch}")
+                accumulated_tokens = desc_tokens  
                 print(f"Accumulated tokens reset to: {accumulated_tokens}")
 
-        # Add any remaining descriptions in the current batch
+
         if self.current_batch:
-            grouped_descriptions.append(self.current_batch)
+            grouped_batched_descriptions.append(self.current_batch)
             print("\n** Final Batch **")
             print("Adding final batch to grouped descriptions:")
-            print(self.current_batch)
-            print("-------------------------------------------------------------")
-
-        return grouped_descriptions
+        return grouped_batched_descriptions
 
 
     def graph_description(self, graph):
@@ -154,56 +133,56 @@ class Graph_Summarizer:
                     'target_node': edge['data']['target_node'],
                     'label': edge['data']['label']} for edge in graph['edges']]
             self.description = self.generate_grouped_descriptions(edges, nodes, batch_size=10)
-            print('self.description generated')
-            # for index, description in enumerate(self.description):
-            #     print(f"Index {index}:\n{description}\n{'-' * 40}")
-            
-            # Split descriptions by token limit
-            batched_descriptions = self.num_tokens_from_string("cl100k_base")
-            # print('total batched descritions',batched_descriptions)
-            return batched_descriptions
+            self.batched_descriptions = self.num_tokens_from_string("cl100k_base")
+            return self.batched_descriptions
         
         else:
             self.description = self.nodes_description(nodes)
-            # print("Node descriptions:", self.description)
             return self.description
 
     def open_ai_summarizer(self, graph,user_query=None,query_json_format = None):
+        prev_summery=[]
         try:
             self.graph_description(graph)
-            print('current batch in the summerizer', self.current_batch)
-            if user_query and query_json_format:
-                prompt = (
-                        f"You are an expert biology assistant on summarizing graph data.\n\n"
-                        f"User Query: {user_query}\n\n"
-                        f"Given the following data visualization:\n{self.current_batch }\n\n"
-                        f"Your task is to analyze the graph and summarize the most important trends, patterns, and relationships.\n"
-                        f"Instructions:\n"
-                        f"- Begin by restating the user's query from {query_json_format} to show its relevance to the graph.\n"
-                        f"- Focus on identifying key trends, relationships, or anomalies directly related to the user's question.\n"
-                        f"- Highlight specific comparisons (if applicable) or variables shown in the graph.\n"
-                        f"- Use bullet points or numbered lists to break down core details when necessary.\n"
-                        f"- Format the response in a clear, concise, and easy-to-read manner.\n\n"
-                        f"Please provide a summary based solely on the information shown in the graph."
-                    )
-            else:
-                prompt = (
-                        f"You are an expert biology assistant on summarizing graph data.\n\n"
-                        f"Given the following graph data:\n{self.current_batch}\n\n"
-                        f"Your task is to analyze and summarize the most important trends, patterns, and relationships.\n"
-                        f"Instructions:\n"
-                        f"- Identify key trends, relationships.\n"
-                        f"- Use bullet points or numbered lists to break down core details when necessary.\n"
-                        f"- Format the response clearly and concisely.\n\n"
-                        f"Count and list important metrics"
-                        F"Identify any central nodes or relationships and highlight any important patterns."
-                        f"Also, mention key relationships between nodes and any interesting structures (such as chains or hubs)."
-                        f"Please provide a summary based solely on the graph information."
-                        f"Start with: 'The graph shows:'"
-                    )
+            for i, batch in enumerate(self.batched_descriptions):
+                print('prev_summery',prev_summery)
+                print(i, batch)  
+                        
+                if user_query and query_json_format:
+                    prompt = (
+                            f"You are an expert biology assistant on summarizing graph data.\n\n"
+                            f"User Query: {user_query}\n\n"
+                            f"Given the following data visualization:\n{batch}\n\n"
+                            f"Given the prev summery of prev batch:\n{prev_summery}\n\n"
+                            f"Your task is to analyze the graph,previous summery and summarize the most important trends, patterns, and relationships.\n"
+                            f"Instructions:\n"
+                            f"- Begin by restating the user's query from {query_json_format} to show its relevance to the graph.\n"
+                            f"- Focus on identifying key trends, relationships, or anomalies directly related to the user's question.\n"
+                            f"- Highlight specific comparisons (if applicable) or variables shown in the graph.\n"
+                            f"- Use bullet points or numbered lists to break down core details when necessary.\n"
+                            f"- Format the response in a clear, concise, and easy-to-read manner.\n\n"
+                            f"Please provide a summary based solely on the information shown in the graph."
+                        )
+                else:
+                    prompt = (
+                            f"You are an expert biology assistant on summarizing graph data.\n\n"
+                            f"Given the following graph data:\n{batch}\n\n"
+                            f"Given the prev summery of prev batch:\n{prev_summery}\n\n"
+                            f"Your task is to analyze and summarize the most important trends, patterns, and relationships.\n"
+                            f"Instructions:\n"
+                            f"- Identify key trends, relationships.\n"
+                            f"- Use bullet points or numbered lists to break down core details when necessary.\n"
+                            f"- Format the response clearly and concisely.\n\n"
+                            f"Count and list important metrics"
+                            F"Identify any central nodes or relationships and highlight any important patterns."
+                            f"Also, mention key relationships between nodes and any interesting structures (such as chains or hubs)."
+                            f"Please provide a summary based solely on the graph information."
+                            f"Start with: 'The graph shows:'"
+                        )
 
 
-            response = self.llm.generate(prompt)
+                response = self.llm.generate(prompt)
+                prev_summery.append(response)
             # cleaned_desc = self.clean_and_format_response(response)
             return response
         except:
