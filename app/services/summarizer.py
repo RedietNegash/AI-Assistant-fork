@@ -144,17 +144,14 @@ class Graph_Summarizer:
         prev_summery=[]
         try:
             self.graph_description(graph)
-            for i, batch in enumerate(self.batched_descriptions):
-                print('prev_summery',prev_summery)
-                print(i, batch)  
-                        
+            for i, batch in enumerate(self.batched_descriptions):           
                 if user_query and query_json_format:
                     prompt = (
                             f"You are an expert biology assistant on summarizing graph data.\n\n"
                             f"User Query: {user_query}\n\n"
                             f"Given the following data visualization:\n{batch}\n\n"
-                            f"Given the prev summery of prev batch:\n{prev_summery}\n\n"
-                            f"Your task is to analyze the graph,previous summery and summarize the most important trends, patterns, and relationships.\n"
+                            f"Given the previous summery of prev batch:\n{prev_summery}\n\n"
+                            f"Your task is to combine the previous summery with the current data visualization and analyze the graph and summarize the most important trends, patterns, and relationships.\n"
                             f"Instructions:\n"
                             f"- Begin by restating the user's query from {query_json_format} to show its relevance to the graph.\n"
                             f"- Focus on identifying key trends, relationships, or anomalies directly related to the user's question.\n"
@@ -168,7 +165,7 @@ class Graph_Summarizer:
                             f"You are an expert biology assistant on summarizing graph data.\n\n"
                             f"Given the following graph data:\n{batch}\n\n"
                             f"Given the prev summery of prev batch:\n{prev_summery}\n\n"
-                            f"Your task is to analyze and summarize the most important trends, patterns, and relationships.\n"
+                            f"Your task is to combine the previous summery with the current data visualization and analyze the graph and summarize the most important trends, patterns, and relationships.\n"
                             f"Instructions:\n"
                             f"- Identify key trends, relationships.\n"
                             f"- Use bullet points or numbered lists to break down core details when necessary.\n"
@@ -183,7 +180,10 @@ class Graph_Summarizer:
 
                 response = self.llm.generate(prompt)
                 prev_summery.append(response)
+                
+               
             # cleaned_desc = self.clean_and_format_response(response)
+            print("Final response", response)
             return response
         except:
             traceback.print_exc()
